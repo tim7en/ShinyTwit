@@ -1,0 +1,2 @@
+# ShinyTwit
+ShinyTwit small app

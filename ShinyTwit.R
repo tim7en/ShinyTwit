@@ -1,5 +1,5 @@
 rm(list = ls())
-# source("pcg.R")
+source("pcg.R")
 
 server <- function(input, output, session) {
   options(shiny.maxRequestSize = 70 * 1024^2) # Max csv data limit set to 60 mb
@@ -13,17 +13,16 @@ server <- function(input, output, session) {
   })
 
   plotTrending <- eventReactive(input$looktrending, {
-    req(input$looktrending)
     req(input$TweetsN)
-    x <- searchTwitter(input$looktrending, n = input$TweetsN, lang = "en")
+    req(input$trending)
+    x <- searchTwitter(input$trending, n = input$TweetsN, lang = "en")
     x <- twListToDF(x)
-
   })
-  
-  textClean <- reactive ({
-    x<-plotTrending()
-    
-    #extract text
+
+  textClean <- reactive({
+    x <- plotTrending()
+
+    # extract text
     x_text <- x$text
     # convert all text to lower case
     x_text <- tolower(x_text)
@@ -42,10 +41,9 @@ server <- function(input, output, session) {
     # Remove blank spaces at the end
     x_text <- gsub(" $", "", x_text)
     # calculationg total score for each sentiment
-    
   })
-  
-  sentim <- reactive ({
+
+  sentim <- reactive({
     x_text <- textClean()
     # convert into corpus type
     x_text.text.corpus <- Corpus(VectorSource(x_text))
@@ -54,7 +52,7 @@ server <- function(input, output, session) {
     # getting emotions using in-built function
     mysentiment_x <- get_nrc_sentiment((x_text))
   })
-  
+
   output$p1 <- renderPlot({
     mysentiment_x <- sentim()
     Sentimentscores_x <- data.frame(colSums(mysentiment_x[, ]))
@@ -66,6 +64,44 @@ server <- function(input, output, session) {
       theme(legend.position = "none") +
       xlab("Sentiments") + ylab("scores") + ggtitle(paste("Sentiments of people behind the tweets on", input$trending, sep = " "))
   }, height = 850, width = 1050)
+
+  output$p2 <- renderPlot({
+    req(textClean())
+    x_text <- textClean()
+    # convert into corpus type
+    x_text.text.corpus <- Corpus(VectorSource(x_text))
+    # clean up by removing stop words
+    x_text.text.corpus <- tm_map(x_text.text.corpus, function(x) removeWords(x, stopwords()))
+    dtm <- TermDocumentMatrix(x_text.text.corpus)
+    m <- as.matrix(dtm)
+    v <- sort(rowSums(m), decreasing = TRUE)
+    d <- data.frame(word = names(v), freq = v)
+    # dev.cur(width = 1000, height = 1000, unit = "px")
+    wordcloud(
+      words = d$word, scale = c(4, .5), freq = sqrt(d$freq), min.freq = 1,
+      max.words = 200, random.order = TRUE, use.r.layout = FALSE,
+      rot.per = 0.35,
+      colors = brewer.pal(8, "Dark2")
+    )
+  }, height = 650, width = 750)
+
+  output$p3 <- renderPlot({
+    req(textClean())
+    x_text <- textClean()
+    # convert into corpus type
+    x_text.text.corpus <- Corpus(VectorSource(x_text))
+    # clean up by removing stop words
+    x_text.text.corpus <- tm_map(x_text.text.corpus, function(x) removeWords(x, stopwords()))
+    dtm <- TermDocumentMatrix(x_text.text.corpus)
+    m <- as.matrix(dtm)
+    v <- sort(rowSums(m), decreasing = TRUE)
+    d <- data.frame(word = names(v), freq = v)
+    barplot(d[1:10, ]$freq,
+      las = 2, names.arg = d[1:10, ]$word,
+      col = "lightblue", main = "Most frequent words",
+      ylab = "Word frequencies"
+    )
+  }, height = 650, width = 750)
 
   trends <- eventReactive(input$woeid, {
     req(input$woeid)
@@ -86,8 +122,9 @@ server <- function(input, output, session) {
     datas <- trends()
     x <- datas[, 1]
     y <- seq(1, length(x))
+    y<- y^2
     # dev.cur(width = 1000, height = 1000, unit = "px")
-    wordcloud(x, rev(y), min.freq = 1, colors = brewer.pal(8, "Dark2"), random.color = TRUE, random.order = TRUE, use.r.layout = FALSE, max.words = 200, rot.per = 0.35)
+    wordcloud(x, sqrt(rev(y)), min.freq = 1, colors = brewer.pal(8, "Dark2"), random.order = TRUE, use.r.layout = FALSE, max.words = 200, rot.per = 0.35)
   }, height = 950, width = 1050)
 }
 
@@ -110,32 +147,38 @@ ui <- dashboardPage(
         fluidRow(
           column(
             width = 3,
-            textInput("location", "Type Location", "Latvia"),
-            actionButton("lookup", "Lookup"), # updated from July 28
-            textInput("woeid", "Numbers from the ")
+            textInput("location", "Type Location", "Latvia", width = 200),
+            hr(),
+            textInput("woeid", "Numbers from the ", width = 200),
+            hr(),
+            actionButton("lookup", "Lookup") # updated from July 28
           ),
           column(
             width = 9,
-            tabsetPanel(
-              tabPanel(
-                "Location",
-                box(
-                  width = 12,
-                  htmlOutput("inc") # ,
-                )
-              ),
-              tabPanel(
-                "WordCloud",
-                box(
-                  width = 12,
-                  plotOutput("p"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
-                )
-              ),
-              tabPanel(
-                "Table",
-                box(
-                  width = 12,
-                  DTOutput("trends"), style = "height:700px; overflow-y: scroll;overflow-x: scroll;"
+            box(
+              title = "Twitter Review: ", status = "success", height =
+                "1595", width = "12", solidHeader = T,
+              tabsetPanel(
+                tabPanel(
+                  "Location",
+                  box(
+                    width = 12,
+                    uiOutput("inc", inline = T)
+                  )
+                ),
+                tabPanel(
+                  "WordCloud",
+                  box(
+                    width = 12,
+                    plotOutput("p"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
+                  )
+                ),
+                tabPanel(
+                  "Table",
+                  box(
+                    width = 12,
+                    DTOutput("trends"), style = "height:700px; overflow-y: scroll;overflow-x: scroll;"
+                  )
                 )
               )
             )
@@ -147,18 +190,46 @@ ui <- dashboardPage(
         fluidRow(
           column(
             width = 3,
-            textInput("trending", "Hashtag", "#Champion"),
+            textInput("trending", "Hashtag", "#Champion", width = 200),
             numericInput("TweetsN", "Number of tweets", 5, min = 1, max = 4000),
             actionButton("looktrending", "Lookup") # updated from July 28
           ),
           column(
             width = 9,
-            tabsetPanel(
-              tabPanel(
-                "Sentiment Plot",
-                box(
-                  width = 12,
-                  plotOutput("p1"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
+            box(
+              title = "Twitter Input: ", status = "success", height =
+                "1595", width = "12", solidHeader = T,
+              tabsetPanel(
+                tabPanel(
+                  "Sentiment Plot",
+                  box(
+                    width = 12,
+                    column(12,
+                      align = "center",
+                      plotOutput("p1"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
+                    )
+                  )
+                ),
+                tabPanel(
+                  "WordCloud",
+                  box(
+                    width = 12,
+                    column(12,
+                      align = "center",
+                      plotOutput("p2"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
+                    )
+                  )
+                ),
+                tabPanel(
+                  "Word Frequency",
+                  box(
+                    width = 12,
+                    column(12,
+                      align = "center",
+
+                      plotOutput("p3"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
+                    )
+                  )
                 )
               )
             )

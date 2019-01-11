@@ -4,12 +4,19 @@ source("pcg.R")
 server <- function(input, output, session) {
   options(shiny.maxRequestSize = 70 * 1024^2) # Max csv data limit set to 60 mb
 
-  output$inc <- eventReactive(input$lookup, {
-    req(input$lookup)
-    getPage <- function() {
-      return((HTML(readLines(paste("http://woeid.rosselliot.co.nz/lookup/", input$location, sep = "")))))
-    }
-    getPage()
+  #Show popup on click
+  observeEvent(input$map_click, {
+    click <- input$map_click
+    text<-paste("Lattitude ", click$lat, "Longtitude ", click$lng)
+    proxy <- leafletProxy("map")
+    proxy %>% clearPopups() %>%
+      addPopups(click$lng, click$lat, text)
+  })
+  
+  output$map <- renderLeaflet({
+    leaflet() %>% 
+      addProviderTiles(providers$OpenStreetMap) %>% 
+      setView(lng = -4, lat= 52.54, zoom = 3)
   })
 
   plotTrending <- eventReactive(input$looktrending, {
@@ -21,7 +28,6 @@ server <- function(input, output, session) {
 
   textClean <- reactive({
     x <- plotTrending()
-
     # extract text
     x_text <- x$text
     # convert all text to lower case
@@ -96,25 +102,27 @@ server <- function(input, output, session) {
     m <- as.matrix(dtm)
     v <- sort(rowSums(m), decreasing = TRUE)
     d <- data.frame(word = names(v), freq = v)
-    barplot(d[1:10, ]$freq,
-      las = 2, names.arg = d[1:10, ]$word,
+    barplot(d[1:30, ]$freq,
+      las = 2, names.arg = d[1:30, ]$word,
       col = "lightblue", main = "Most frequent words",
       ylab = "Word frequencies"
     )
-  }, height = 650, width = 750)
+  }, height = 750, width = 750)
 
-  trends <- eventReactive(input$woeid, {
-    req(input$woeid)
-    current_trends <- getTrends(input$woeid)
-    current_trends["trend_date"] <- Sys.Date()
+  trends <- reactive ({
+    req(input$map_click)
+    click <- input$map_click
+    woeid <- closestTrendLocations(lat = click$lat, long = click$lng)
+    current_trends <- getTrends(as.numeric(woeid[3]))
     current_trends <- as.data.frame(current_trends)
+    current_trends$trend_date <- Sys.Date()
     names(current_trends)[1] <- "Trending"
     current_trends
   })
 
-  output$trends <- renderDT({
-    req(input$woeid)
-    trends()
+  output$trends <- DT::renderDT({
+    req(input$map_click)
+    as.data.frame(trends())
   })
 
   output$p <- renderPlot({
@@ -122,8 +130,7 @@ server <- function(input, output, session) {
     datas <- trends()
     x <- datas[, 1]
     y <- seq(1, length(x))
-    y<- y^2
-    # dev.cur(width = 1000, height = 1000, unit = "px")
+    y <- y^2
     wordcloud(x, sqrt(rev(y)), min.freq = 1, colors = brewer.pal(8, "Dark2"), random.order = TRUE, use.r.layout = FALSE, max.words = 200, rot.per = 0.35)
   }, height = 950, width = 1050)
 }
@@ -146,14 +153,6 @@ ui <- dashboardPage(
         tabName = "dataInput",
         fluidRow(
           column(
-            width = 3,
-            textInput("location", "Type Location", "Latvia", width = 200),
-            hr(),
-            textInput("woeid", "Numbers from the ", width = 200),
-            hr(),
-            actionButton("lookup", "Lookup") # updated from July 28
-          ),
-          column(
             width = 9,
             box(
               title = "Twitter Review: ", status = "success", height =
@@ -163,21 +162,24 @@ ui <- dashboardPage(
                   "Location",
                   box(
                     width = 12,
-                    uiOutput("inc", inline = T)
+                    leafletOutput("map", height = 800)
                   )
                 ),
                 tabPanel(
                   "WordCloud",
-                  box(
-                    width = 12,
-                    plotOutput("p"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
+                  column(12,
+                         align = "center",
+                    box(
+                      width = 12,
+                      plotOutput("p"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
+                    )
                   )
                 ),
                 tabPanel(
                   "Table",
                   box(
                     width = 12,
-                    DTOutput("trends"), style = "height:700px; overflow-y: scroll;overflow-x: scroll;"
+                    DT::dataTableOutput("trends"), style = "height:700px; overflow-y: scroll;overflow-x: scroll;"
                   )
                 )
               )
@@ -190,9 +192,13 @@ ui <- dashboardPage(
         fluidRow(
           column(
             width = 3,
-            textInput("trending", "Hashtag", "#Champion", width = 200),
-            numericInput("TweetsN", "Number of tweets", 5, min = 1, max = 4000),
-            actionButton("looktrending", "Lookup") # updated from July 28
+            box(
+              title = "Twitter Input: ", status = "success", height =
+                "1595", width = "12", solidHeader = T,
+              textInput("trending", "Hashtag", "#Champion", width = 200),
+              numericInput("TweetsN", "Number of tweets", 5, min = 1, max = 4000, width = 200),
+              actionButton("looktrending", "Lookup") # updated from July 28
+            )
           ),
           column(
             width = 9,
@@ -226,7 +232,6 @@ ui <- dashboardPage(
                     width = 12,
                     column(12,
                       align = "center",
-
                       plotOutput("p3"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
                     )
                   )

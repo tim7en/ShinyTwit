@@ -21,11 +21,23 @@ server = function(input, output) {
 
 
 
-r<-GET("http://woeid.rosselliot.co.nz/lookup/latvia")
-r<-GET("http://woeid.rosselliot.co.nz/lookup/India")
+r<-httr::GET("http://woeid.rosselliot.co.nz/lookup/latvia")
+r<-httr::GET("http://woeid.rosselliot.co.nz/lookup/India")
 
-woeid <- content(r,"text")
-woeid <-strsplit(woeid, " ")
+httr::http_type(r)
+
+woeid <- httr::content(r, "text")#,"parsed"))
+
+class(woeid)
+
+grep('Country', woeid, value = T)
+
+
+woeid <-strsplit(woeid, "\t\n")
+
+grep("Country", woeid)
+
+
 
 pos <- grep('data-woeid', woeid[[1]])
 pos2 <- grep('District-County', woeid[[1]])

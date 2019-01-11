@@ -4,7 +4,7 @@ pacman::p_load(
   parallel, lhs, ggplot2, rstudioapi, boot, dplyr, rhandsontable,
   RColorBrewer,wordcloud,tm,twitteR,ROAuth,plyr,stringr,base64enc,
   NLP,syuzhet,SnowballC,stringi,topicmodels,wordcloud,ggplot2,
-  rtweet,dplyr,tidytext
+  rtweet,dplyr,tidytext, leaflet, rgdal, htmlwidgets
 )
 download.file(url="http://curl.haxx.se/ca/cacert.pem",destfile="cacert.pem")
 # Set constant requestURL

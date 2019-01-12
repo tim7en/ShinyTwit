@@ -1,25 +1,116 @@
 rm(list = ls())
 source("pcg.R")
+source ("functions.R")
 
 server <- function(input, output, session) {
   options(shiny.maxRequestSize = 70 * 1024^2) # Max csv data limit set to 60 mb
 
-  #Show popup on click
+  #Page 1 view, maps
+  output$map <- renderLeaflet({
+    leaflet() %>%
+      addProviderTiles(providers$OpenStreetMap) %>%
+      setView(lng = -4, lat = 52.54, zoom = 3)
+  })
+  # Show popup on click
   observeEvent(input$map_click, {
     click <- input$map_click
-    text<-paste("Lattitude ", click$lat, "Longtitude ", click$lng)
+    text <- paste("Lattitude ", click$lat, "Longtitude ", click$lng)
     proxy <- leafletProxy("map")
-    proxy %>% clearPopups() %>%
+    proxy %>%
+      clearPopups() %>%
       addPopups(click$lng, click$lat, text)
   })
+
   
-  output$map <- renderLeaflet({
-    leaflet() %>% 
-      addProviderTiles(providers$OpenStreetMap) %>% 
-      setView(lng = -4, lat= 52.54, zoom = 3)
+  
+  #Page 1 view, functions & plots
+  trends <- reactive({
+    req(input$map_click)
+    click <- input$map_click
+    woeid <- closestTrendLocations(lat = click$lat, long = click$lng)
+    current_trends <- getTrends(as.numeric(woeid[3]))
+    current_trends <- as.data.frame(current_trends)
+    current_trends$trend_date <- Sys.Date()
+    names(current_trends)[1] <- "Trending"
+    current_trends
+  })
+  
+  #Word cloud
+  output$p <- renderPlot({
+    req(trends())
+    datas <- trends()
+    x <- datas[, 1]
+    y <- seq(1, length(x))
+    y <- y^2
+    wordcloud(x, sqrt(rev(y)), scale = c(1.2,0.2), min.freq = 1, colors = brewer.pal(8, "Dark2"), random.order = TRUE, use.r.layout = FALSE, max.words = 200, rot.per = 0.35)
+  }, height = 330, width = 350)
+  
+  #Dynamic trends selection & sentiment analysis
+  output$trends <- DT::renderDT({
+    req(input$map_click)
+    as.data.frame(trends())
+  })
+  
+  output$top<- renderUI({
+    datas<- trends()
+    selectInput(inputId = "xE", label = "Sentiment & Frequency, N = 300", choices = datas$Trending)
   })
 
-  plotTrending <- eventReactive(input$looktrending, {
+  Trending_top <- reactive({
+    req(input$xE)
+    x <- searchTwitter(input$xE, n = 300, lang = "en")
+    x <- twListToDF(x)
+  })
+  
+  textClean_top <- reactive({
+    x <- Trending_top()
+    cleanText (x)
+  })
+  
+  sentim_top <- reactive({
+    x_text <- textClean_top()
+    x_text.text.corpus <- Corpus(VectorSource(x_text))
+    x_text.text.corpus <- tm_map(x_text.text.corpus, function(x) removeWords(x, stopwords()))
+    mysentiment_x <- get_nrc_sentiment((x_text))
+  })
+  
+  output$p1_top <- renderPlot({
+    mysentiment_x <- sentim_top()
+    Sentimentscores_x <- data.frame(colSums(mysentiment_x[, ]))
+    names(Sentimentscores_x) <- "Score"
+    Sentimentscores_x <- cbind("sentiment" = rownames(Sentimentscores_x), Sentimentscores_x)
+    rownames(Sentimentscores_x) <- NULL
+    # plotting the sentiments with scores
+    ggplot(data = Sentimentscores_x, aes(x = sentiment, y = Score)) + geom_bar(aes(fill = sentiment), stat = "identity") +
+      theme(legend.position = "none") +
+      xlab("Sentiments") + ylab("scores") +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+      ggtitle(paste("Sentiments of people behind the tweets on", input$xE, sep = " "))
+  }, height = 350, width = 350)
+  
+  output$p3_top <- renderPlot({
+    req(textClean_top())
+    x_text <- textClean_top()
+    # convert into corpus type
+    x_text.text.corpus <- Corpus(VectorSource(x_text))
+    # clean up by removing stop words
+    x_text.text.corpus <- tm_map(x_text.text.corpus, function(x) removeWords(x, stopwords()))
+    dtm <- TermDocumentMatrix(x_text.text.corpus)
+    m <- as.matrix(dtm)
+    v <- sort(rowSums(m), decreasing = TRUE)
+    d <- data.frame(word = names(v), freq = v)
+    barplot(d[1:10, ]$freq,
+            las = 2, names.arg = d[1:10, ]$word,
+            col = "salmon", main = "Most frequent words",
+            ylab = "Word frequencies"#,
+            #theme(axis.text.x = element_text(angle = 90, hjust = 1))
+            
+    )
+  }, height = 350, width = 350)
+
+  #Page 2 data exploration
+  #Separate analysis
+  Trending <- eventReactive(input$looktrending, {
     req(input$TweetsN)
     req(input$trending)
     x <- searchTwitter(input$trending, n = input$TweetsN, lang = "en")
@@ -27,26 +118,8 @@ server <- function(input, output, session) {
   })
 
   textClean <- reactive({
-    x <- plotTrending()
-    # extract text
-    x_text <- x$text
-    # convert all text to lower case
-    x_text <- tolower(x_text)
-    # Replace blank space ("rt")
-    x_text <- gsub("rt", "", x_text)
-    # Replace @UserName
-    x_text <- gsub("@\\w+", "", x_text)
-    # Remove punctuation
-    x_text <- gsub("[[:punct:]]", "", x_text)
-    # Remove links
-    x_text <- gsub("http\\w+", "", x_text)
-    # Remove tabs
-    x_text <- gsub("[ |\t]{2,}", "", x_text)
-    # Remove blank spaces at the beginning
-    x_text <- gsub("^ ", "", x_text)
-    # Remove blank spaces at the end
-    x_text <- gsub(" $", "", x_text)
-    # calculationg total score for each sentiment
+    x <- Trending()
+    cleanText (x)
   })
 
   sentim <- reactive({
@@ -108,31 +181,6 @@ server <- function(input, output, session) {
       ylab = "Word frequencies"
     )
   }, height = 750, width = 750)
-
-  trends <- reactive ({
-    req(input$map_click)
-    click <- input$map_click
-    woeid <- closestTrendLocations(lat = click$lat, long = click$lng)
-    current_trends <- getTrends(as.numeric(woeid[3]))
-    current_trends <- as.data.frame(current_trends)
-    current_trends$trend_date <- Sys.Date()
-    names(current_trends)[1] <- "Trending"
-    current_trends
-  })
-
-  output$trends <- DT::renderDT({
-    req(input$map_click)
-    as.data.frame(trends())
-  })
-
-  output$p <- renderPlot({
-    req(trends())
-    datas <- trends()
-    x <- datas[, 1]
-    y <- seq(1, length(x))
-    y <- y^2
-    wordcloud(x, sqrt(rev(y)), min.freq = 1, colors = brewer.pal(8, "Dark2"), random.order = TRUE, use.r.layout = FALSE, max.words = 200, rot.per = 0.35)
-  }, height = 950, width = 1050)
 }
 
 
@@ -156,23 +204,13 @@ ui <- dashboardPage(
             width = 9,
             box(
               title = "Twitter Review: ", status = "success", height =
-                "1595", width = "12", solidHeader = T,
+                "900", width = "12", solidHeader = T,
               tabsetPanel(
                 tabPanel(
                   "Location",
                   box(
                     width = 12,
-                    leafletOutput("map", height = 800)
-                  )
-                ),
-                tabPanel(
-                  "WordCloud",
-                  column(12,
-                         align = "center",
-                    box(
-                      width = 12,
-                      plotOutput("p"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
-                    )
+                    leafletOutput("map", height = 750)
                   )
                 ),
                 tabPanel(
@@ -182,6 +220,27 @@ ui <- dashboardPage(
                     DT::dataTableOutput("trends"), style = "height:700px; overflow-y: scroll;overflow-x: scroll;"
                   )
                 )
+              )
+            )
+          ),
+          column(
+            width = 3, align = "center",
+            # box(
+            #   title = "Current Trends: ", status = "warning", height =
+            #     "400", width = "400", solidHeader = T,
+            #   plotOutput("p"), style = "height:350px;width:400;"#overflow-y: scroll;overflow-x: scroll;"
+            # ),
+            box (
+              title = "Top in Trends: ", status = "success", height =
+                "900", width = "400", solidHeader = T,
+              uiOutput('top'),
+              column(12,
+                     align = "center",
+                     withSpinner(plotOutput("p1_top"))
+              ),
+              column(12,
+                     align = "center",
+                     withSpinner(plotOutput("p3_top"))
               )
             )
           )
@@ -196,7 +255,7 @@ ui <- dashboardPage(
               title = "Twitter Input: ", status = "success", height =
                 "1595", width = "12", solidHeader = T,
               textInput("trending", "Hashtag", "#Champion", width = 200),
-              numericInput("TweetsN", "Number of tweets", 5, min = 1, max = 4000, width = 200),
+              numericInput("TweetsN", "Number of tweets", 5, min = 1, max = 10001, width = 200),
               actionButton("looktrending", "Lookup") # updated from July 28
             )
           ),
@@ -212,7 +271,7 @@ ui <- dashboardPage(
                     width = 12,
                     column(12,
                       align = "center",
-                      plotOutput("p1"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
+                      withSpinner(plotOutput("p1")), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
                     )
                   )
                 ),
@@ -222,7 +281,7 @@ ui <- dashboardPage(
                     width = 12,
                     column(12,
                       align = "center",
-                      plotOutput("p2"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
+                      withSpinner(plotOutput("p2")), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
                     )
                   )
                 ),
@@ -232,7 +291,7 @@ ui <- dashboardPage(
                     width = 12,
                     column(12,
                       align = "center",
-                      plotOutput("p3"), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
+                      withSpinner(plotOutput("p3")), style = "height:800px;width:600;overflow-y: scroll;overflow-x: scroll;"
                     )
                   )
                 )

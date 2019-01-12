@@ -10,7 +10,7 @@ runApp(list(ui= fluidPage(
 ),
 server = function(input, output) {
   getPage<-function() {
-    return((HTML(readLines('http://woeid.rosselliot.co.nz/lookup/latvia'))))
+    return((HTML(readLines('http://twitter.com/search?q=%22Win+A+Copy%22'))))
   }
   output$inc<-renderUI({
     x <- input$test  

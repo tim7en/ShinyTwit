@@ -187,7 +187,7 @@ twitter_tokens<- create_token(app = "ShinyTwit", consumer_key = consumerKey,
                               accessTokenSecret)
 
 # find recent tweets with #rstats but ignore retweets
-users <- search_users("#binance", n = 3000)
+users <- rtweet::search_users("#binance", n = 3000)
 
 users$location[which(users$location=="")]<-NA
 
